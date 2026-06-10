@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
-import { ArrowUp, Blocks, Gauge, Sparkles, Zap } from "lucide-react";
+import { ArrowUp, Blocks, Gauge, Sparkles, UserRound, Zap } from "lucide-react";
 
 type Role = "user" | "assistant";
 
@@ -163,18 +163,18 @@ export default function Home() {
             <span>垂直整合</span>
           </div>
         </div>
-
-        <div className="model-status">
-          <span>GLM</span>
-          <span>thinking off</span>
-        </div>
       </aside>
 
       <section className="chat-panel" aria-label="AI chat">
         <header className="chat-header">
-          <div>
-            <h2>Musk OS</h2>
-            <p>第一性原理 AI 对话</p>
+          <div className="chat-title-row">
+            <span className="header-avatar" aria-hidden="true">
+              <img src="/ai-avatar.jpg" alt="" />
+            </span>
+            <div>
+              <h2>Musk OS</h2>
+              <p>第一性原理 AI 对话</p>
+            </div>
           </div>
         </header>
 
@@ -185,17 +185,23 @@ export default function Home() {
               key={message.id}
               aria-label={message.role === "user" ? "用户消息" : "AI 消息"}
             >
-              <div className="message-role">
-                {message.role === "user" ? "You" : "Musk OS"}
-              </div>
-              <div className="message-content">
-                {message.content || (
-                  <span className="typing">
-                    <span />
-                    <span />
-                    <span />
-                  </span>
+              <div className={`avatar ${message.role}`} aria-hidden="true">
+                {message.role === "assistant" ? (
+                  <img src="/ai-avatar.jpg" alt="" />
+                ) : (
+                  <UserRound size={20} strokeWidth={2.2} />
                 )}
+              </div>
+              <div className="bubble">
+                <div className="message-content">
+                  {message.content || (
+                    <span className="typing">
+                      <span />
+                      <span />
+                      <span />
+                    </span>
+                  )}
+                </div>
               </div>
             </article>
           ))}
