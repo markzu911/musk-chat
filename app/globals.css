@@ -185,6 +185,13 @@ textarea:disabled {
   font-size: 0.94rem;
 }
 
+.chat-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
 .credit-status {
   display: flex;
   flex: 0 0 auto;
@@ -204,6 +211,29 @@ textarea:disabled {
 .credit-status strong {
   color: var(--accent);
   font-weight: 850;
+}
+
+.icon-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--muted);
+  transition:
+    border-color 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.icon-button:not(:disabled):hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: translateY(-1px);
 }
 
 .message-list {
@@ -462,6 +492,11 @@ textarea:disabled {
   .chat-header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .chat-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .credit-status {

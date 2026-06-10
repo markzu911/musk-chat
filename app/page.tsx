@@ -1,7 +1,15 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
-import { ArrowUp, Blocks, Gauge, Sparkles, UserRound, Zap } from "lucide-react";
+import {
+  ArrowUp,
+  Blocks,
+  Gauge,
+  RotateCcw,
+  Sparkles,
+  UserRound,
+  Zap
+} from "lucide-react";
 
 type Role = "user" | "assistant";
 
@@ -228,6 +236,16 @@ export default function Home() {
     }
   }
 
+  function clearMessages() {
+    if (isLoading) {
+      return;
+    }
+
+    setMessages([introMessage]);
+    setInput("");
+    setError("");
+  }
+
   return (
     <main className="app-shell">
       <aside className="decor-panel" aria-label="Musk OS profile">
@@ -270,17 +288,29 @@ export default function Home() {
               <p>第一性原理 AI 对话</p>
             </div>
           </div>
-          {launchState ? (
-            <div className="credit-status" aria-label="积分状态">
-              <span>{launchState.userName || "用户"}</span>
-              {launchState.integral !== null ? (
-                <strong>{launchState.integral} 积分</strong>
-              ) : null}
-              {launchState.cost !== null ? (
-                <span>本次 {launchState.cost}</span>
-              ) : null}
-            </div>
-          ) : null}
+          <div className="chat-actions">
+            {launchState ? (
+              <div className="credit-status" aria-label="积分状态">
+                <span>{launchState.userName || "用户"}</span>
+                {launchState.integral !== null ? (
+                  <strong>{launchState.integral} 积分</strong>
+                ) : null}
+                {launchState.cost !== null ? (
+                  <span>本次 {launchState.cost}</span>
+                ) : null}
+              </div>
+            ) : null}
+            <button
+              className="icon-button"
+              type="button"
+              title="清空聊天记录"
+              aria-label="清空聊天记录"
+              onClick={clearMessages}
+              disabled={isLoading || messages.length <= 1}
+            >
+              <RotateCcw size={18} />
+            </button>
+          </div>
         </header>
 
         <div className="message-list" aria-live="polite">
