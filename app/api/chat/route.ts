@@ -20,7 +20,21 @@ type ZhipuDeltaPayload = {
   }>;
 };
 
+type ToolContext = {
+  userId: string;
+  toolId: string;
+};
+
+type ToolApiPayload = {
+  success?: unknown;
+  valid?: unknown;
+  message?: unknown;
+  error?: unknown;
+  data?: unknown;
+};
+
 const DEFAULT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4";
+const DEFAULT_SAAS_BASE_URL = "http://aibigtree.com";
 
 export async function POST(request: Request) {
   const apiKey = process.env.ZHIPU_API_KEY;
@@ -34,6 +48,7 @@ export async function POST(request: Request) {
 
   const payload = await request.json().catch(() => null);
   const messages = sanitizeMessages(payload?.messages);
+  const toolContext = readToolContext(payload);
 
   if (messages.length === 0) {
     return Response.json({ error: "消息不能为空。" }, { status: 400 });
@@ -44,6 +59,24 @@ export async function POST(request: Request) {
   const thinkingType = process.env.ZHIPU_THINKING_TYPE ?? "disabled";
   const temperature = readNumberEnv("ZHIPU_TEMPERATURE", 0.72);
   const maxTokens = readNumberEnv("ZHIPU_MAX_TOKENS", 1800);
+
+  if (!toolContext && process.env.SAAS_CREDITS_REQUIRED === "true") {
+    return Response.json(
+      { error: "缺少 userId 或 toolId，无法进行积分校验。" },
+      { status: 400 }
+    );
+  }
+
+  if (toolContext) {
+    const verifyResult = await callToolEndpoint("verify", toolContext);
+
+    if (!isToolApiSuccess(verifyResult)) {
+      return Response.json(
+        { error: readToolApiMessage(verifyResult, "积分校验失败。") },
+        { status: 402 }
+      );
+    }
+  }
 
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
@@ -78,14 +111,18 @@ export async function POST(request: Request) {
     return Response.json({ error: "智谱接口没有返回流式响应。" }, { status: 502 });
   }
 
-  return streamZhipuResponse(response.body);
+  return streamZhipuResponse(response.body, toolContext);
 }
 
-function streamZhipuResponse(body: ReadableStream<Uint8Array>) {
+function streamZhipuResponse(
+  body: ReadableStream<Uint8Array>,
+  toolContext: ToolContext | null
+) {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
   let buffer = "";
+  let generatedText = "";
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -117,8 +154,20 @@ function streamZhipuResponse(body: ReadableStream<Uint8Array>) {
             const content = extractContent(data);
 
             if (content) {
+              generatedText += content;
               controller.enqueue(encoder.encode(content));
             }
+          }
+        }
+
+        if (toolContext && generatedText.trim()) {
+          const consumeResult = await callToolEndpoint("consume", toolContext);
+
+          if (!isToolApiSuccess(consumeResult)) {
+            console.error(
+              "SaaS consume failed:",
+              readToolApiMessage(consumeResult, "扣费接口返回失败。")
+            );
           }
         }
       } catch (error) {
@@ -140,6 +189,37 @@ function streamZhipuResponse(body: ReadableStream<Uint8Array>) {
       "X-Accel-Buffering": "no"
     }
   });
+}
+
+async function callToolEndpoint(action: "verify" | "consume", context: ToolContext) {
+  const baseUrl = normalizeBaseUrl(
+    process.env.SAAS_API_BASE_URL ?? DEFAULT_SAAS_BASE_URL
+  );
+
+  try {
+    const response = await fetch(`${baseUrl}/api/tool/${action}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(context)
+    });
+    const payload = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      return {
+        success: false,
+        message: readToolApiMessage(payload, response.statusText)
+      };
+    }
+
+    return payload as ToolApiPayload;
+  } catch (error) {
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : "积分接口请求失败。"
+    };
+  }
 }
 
 function extractContent(data: string) {
@@ -211,6 +291,59 @@ function sanitizeMessages(messages: unknown): ClientMessage[] {
     })
     .filter((message): message is ClientMessage => message !== null)
     .slice(-24);
+}
+
+function readToolContext(payload: unknown): ToolContext | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const userId =
+    "userId" in payload && typeof payload.userId === "string"
+      ? sanitizeId(payload.userId)
+      : "";
+  const toolId =
+    "toolId" in payload && typeof payload.toolId === "string"
+      ? sanitizeId(payload.toolId)
+      : "";
+
+  if (!userId || !toolId) {
+    return null;
+  }
+
+  return { userId, toolId };
+}
+
+function sanitizeId(value: string) {
+  const normalized = value.trim();
+
+  if (
+    !normalized ||
+    normalized === "null" ||
+    normalized === "undefined"
+  ) {
+    return "";
+  }
+
+  return normalized;
+}
+
+function isToolApiSuccess(payload: ToolApiPayload | null) {
+  return payload?.success === true || payload?.valid === true;
+}
+
+function readToolApiMessage(payload: unknown, fallback: string) {
+  if (payload && typeof payload === "object") {
+    if ("message" in payload && typeof payload.message === "string") {
+      return payload.message;
+    }
+
+    if ("error" in payload && typeof payload.error === "string") {
+      return payload.error;
+    }
+  }
+
+  return fallback;
 }
 
 function normalizeBaseUrl(baseUrl: string) {

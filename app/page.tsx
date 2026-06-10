@@ -11,6 +11,18 @@ type Message = {
   content: string;
 };
 
+type ToolContext = {
+  userId: string;
+  toolId: string;
+};
+
+type LaunchState = {
+  userName: string;
+  enterprise: string;
+  integral: number | null;
+  cost: number | null;
+};
+
 const introMessage: Message = {
   id: "intro",
   role: "assistant",
@@ -31,7 +43,84 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const [toolContext, setToolContext] = useState<ToolContext | null>(null);
+  const [launchState, setLaunchState] = useState<LaunchState | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const initialContext = createToolContext({
+      userId: searchParams.get("userId"),
+      toolId: searchParams.get("toolId")
+    });
+
+    if (initialContext) {
+      setToolContext(initialContext);
+    }
+
+    function handleMessage(event: MessageEvent) {
+      const data = event.data;
+
+      if (!data || typeof data !== "object" || data.type !== "SAAS_INIT") {
+        return;
+      }
+
+      const nextContext = createToolContext({
+        userId: data.userId,
+        toolId: data.toolId
+      });
+
+      if (nextContext) {
+        setToolContext(nextContext);
+      }
+    }
+
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
+
+  useEffect(() => {
+    if (!toolContext) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function launchTool() {
+      try {
+        const response = await fetch("/api/tool/launch", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(toolContext)
+        });
+        const payload = await response.json().catch(() => null);
+
+        if (!response.ok || !isSuccessPayload(payload)) {
+          throw new Error(readApiMessage(payload, "积分初始化失败。"));
+        }
+
+        if (!cancelled) {
+          setLaunchState(readLaunchState(payload));
+        }
+      } catch (caughtError) {
+        if (!cancelled) {
+          const message =
+            caughtError instanceof Error
+              ? caughtError.message
+              : "积分初始化失败。";
+          setError(message);
+        }
+      }
+    }
+
+    void launchTool();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [toolContext]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -69,6 +158,7 @@ export default function Home() {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
+          ...toolContext,
           messages: [...messages, userMessage].map(({ role, content }) => ({
             role,
             content
@@ -109,6 +199,10 @@ export default function Home() {
 
       if (!assistantText.trim()) {
         throw new Error("模型返回为空。");
+      }
+
+      if (toolContext) {
+        void refreshLaunchState(toolContext, setLaunchState);
       }
     } catch (caughtError) {
       const message =
@@ -176,6 +270,17 @@ export default function Home() {
               <p>第一性原理 AI 对话</p>
             </div>
           </div>
+          {launchState ? (
+            <div className="credit-status" aria-label="积分状态">
+              <span>{launchState.userName || "用户"}</span>
+              {launchState.integral !== null ? (
+                <strong>{launchState.integral} 积分</strong>
+              ) : null}
+              {launchState.cost !== null ? (
+                <span>本次 {launchState.cost}</span>
+              ) : null}
+            </div>
+          ) : null}
         </header>
 
         <div className="message-list" aria-live="polite">
@@ -237,4 +342,117 @@ export default function Home() {
       </section>
     </main>
   );
+}
+
+function createToolContext(input: { userId: unknown; toolId: unknown }) {
+  const userId = sanitizeId(input.userId);
+  const toolId = sanitizeId(input.toolId);
+
+  if (!userId || !toolId) {
+    return null;
+  }
+
+  return { userId, toolId };
+}
+
+function sanitizeId(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const normalized = value.trim();
+
+  if (
+    !normalized ||
+    normalized === "null" ||
+    normalized === "undefined"
+  ) {
+    return "";
+  }
+
+  return normalized;
+}
+
+function isSuccessPayload(payload: unknown) {
+  return Boolean(
+    payload &&
+      typeof payload === "object" &&
+      ("success" in payload && payload.success === true)
+  );
+}
+
+function readApiMessage(payload: unknown, fallback: string) {
+  if (payload && typeof payload === "object") {
+    if ("message" in payload && typeof payload.message === "string") {
+      return payload.message;
+    }
+
+    if ("error" in payload && typeof payload.error === "string") {
+      return payload.error;
+    }
+  }
+
+  return fallback;
+}
+
+function readLaunchState(payload: unknown): LaunchState {
+  const data =
+    payload &&
+    typeof payload === "object" &&
+    "data" in payload &&
+    payload.data &&
+    typeof payload.data === "object"
+      ? payload.data
+      : null;
+  const user =
+    data && "user" in data && data.user && typeof data.user === "object"
+      ? data.user
+      : null;
+  const tool =
+    data && "tool" in data && data.tool && typeof data.tool === "object"
+      ? data.tool
+      : null;
+
+  return {
+    userName: readString(user, "name"),
+    enterprise: readString(user, "enterprise"),
+    integral: readNumber(user, "integral"),
+    cost: readNumber(tool, "integral")
+  };
+}
+
+function readString(source: unknown, key: string) {
+  if (source && typeof source === "object" && key in source) {
+    const value = source[key as keyof typeof source];
+    return typeof value === "string" ? value : "";
+  }
+
+  return "";
+}
+
+function readNumber(source: unknown, key: string) {
+  if (source && typeof source === "object" && key in source) {
+    const value = source[key as keyof typeof source];
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  }
+
+  return null;
+}
+
+async function refreshLaunchState(
+  toolContext: ToolContext,
+  setLaunchState: (value: LaunchState | null) => void
+) {
+  const response = await fetch("/api/tool/launch", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(toolContext)
+  });
+  const payload = await response.json().catch(() => null);
+
+  if (response.ok && isSuccessPayload(payload)) {
+    setLaunchState(readLaunchState(payload));
+  }
 }
